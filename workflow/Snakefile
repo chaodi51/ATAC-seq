@@ -1,0 +1,131 @@
+# The main entry point of the workflow
+# snakemake  --rerun-incomplete --latency-wait 20 -j 100 -p -c "sbatch --job-name={params.jobName} --time=22:00:00 --mem={params.mem} -c {threads} -e sbatch/{params.jobName}.e -o sbatch/{params.jobName}.o"
+shell.prefix("source ~/.bash_profile; ")
+import os
+import pandas as pd
+
+##### load config #####
+configfile: "../config/config_atac-seq.yaml"
+
+# data dir
+# raw_fq = config["data_dir"]["raw_fq"]
+trimmed_fq = config["data_dir"]["trimmed_fq"]
+STAR_index = config["index"]["STAR_index"]
+STAR_align = config["data_dir"]["STAR_align"]
+STAR_align_filter = config['data_dir']['STAR_align_filter']
+ATACseqQC = config['data_dir']['ATACseqQC']
+macs2 = config['data_dir']['macs2']
+macs2_merged_bam = config['data_dir']['macs2_merged_bam']
+merged_bams = config['data_dir']['merged_bams']
+diff_peaks = config['data_dir']['diff_peaks']
+bw_rpm = config["data_dir"]["bw_rpm"]
+bw_cpm = config["data_dir"]["bw_cpm"]
+footprinting = config['data_dir']['footprinting']
+nucleosome_pos = config['data_dir']['nucleosome_pos']
+gtf_file = config["genome"]["annotation"]
+
+# store the raw data under the "/data" folder, and the results in ../results/
+if not os.path.exists("./raw_fq"):
+    os.symlink(raw_fq, "raw_fq")
+if not os.path.exists(trimmed_fq):
+    os.makedirs(trimmed_fq)
+    os.symlink(trimmed_fq,"trimmed_fq")
+if not os.path.exists(STAR_align):
+    os.makedirs(STAR_align)
+    os.symlink(STAR_align, "STAR_align")
+if not os.path.exists(STAR_align_filter):
+    os.makedirs(STAR_align_filter)
+    os.symlink(STAR_align_filter, "STAR_align_filter")
+if not os.path.exists(ATACseqQC):
+    os.makedirs(ATACseqQC)
+    os.symlink(ATACseqQC,"ATACseqQC")    
+if not os.path.exists(macs2_merged_bam):
+    os.makedirs(macs2_merged_bam)
+    os.symlink(macs2_merged_bam,"macs2_merged_bam")
+if not os.path.exists(merged_bams):
+    os.makedirs(merged_bams)
+    os.symlink(merged_bams,"merged_bams")
+if not os.path.exists(macs2):
+    os.makedirs(macs2)
+    os.symlink(macs2,"macs2")    
+if not os.path.exists(diff_peaks):
+    os.makedirs(diff_peaks)
+    os.symlink(diff_peaks,"diff_peaks")
+if not os.path.exists(footprinting):
+    os.makedirs(footprinting)
+    os.symlink(footprinting,"footprinting")     
+if not os.path.exists(nucleosome_pos):
+    os.makedirs(nucleosome_pos)
+    os.symlink(nucleosome_pos,"nucleosome_pos")      
+if not os.path.exists(bw_rpm):
+    os.makedirs(bw_rpm)
+    os.symlink(bw_rpm, "bw_rpm")
+if not os.path.exists(bw_cpm):
+    os.makedirs(bw_cpm)
+    os.symlink(bw_cpm, "bw_cpm")    
+if not os.path.exists("sbatch"):
+    os.makedirs("sbatch")
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+if not os.path.exists("STAR_index"):
+    os.symlink(STAR_index, "STAR_index")  
+
+##### sample sheets #####
+sample_table = pd.read_table(config['samples']).set_index('sample',drop=False)
+sample_table.index.astype('str')   # enforce str in index
+SAMPLES = sample_table['sample'].tolist()
+GROUPS = sample_table['group'].unique().tolist()
+DATA = sample_table['data'].unique().tolist()
+
+# single-end sample does not have 'fq2' column in the table 'sample_table.tsv'
+def is_single_end(sample):
+    return pd.isnull(sample_table.loc[sample, "fq2"])
+
+def get_fastq(wildcards):
+    if not is_single_end(**wildcards):
+        return expand("raw_fq/{sample}_{group}.fastq.gz", group=[1, 2], **wildcards)
+    return "raw_fq/{sample}.fastq.gz".format(**wildcards)
+
+##### target rules #####
+rule all:
+    input:
+        trimmed = expand(["trimmed_fq/{sample}_1_trimmed.fq.gz", "trimmed_fq/{sample}_2_trimmed.fq.gz"], sample=SAMPLES),
+        fastqc = '../results/multiqc/fastqc/multiqc_report.html',
+        STAR_algin = expand(["STAR_align/{sample}.bam", "STAR_align/{sample}.bam.bai"], sample=SAMPLES),
+        mapped_reads = "report/mapped_reads.txt",
+        rpm_factor = "report/rpm_factor.txt",
+        rmchrM = expand("STAR_align_filter/{sample}.rmChrM.bam", sample=SAMPLES),
+        rmdup = expand("STAR_align_filter/{sample}.rmdup.bam", sample=SAMPLES),
+        rmBList = expand("STAR_align_filter/{sample}.rmBList.bam", sample=SAMPLES),
+        merged_bam = expand("merged_bams/{group}.bam", group=GROUPS), 
+        report = expand("ATACseqQC/{sample}_report.html",sample=SAMPLES), 
+        peak = expand(["macs2/narrowPeak/{sample}_peaks.narrowPeak", "macs2/broadPeak/{sample}_peaks.broadPeak"], sample=SAMPLES),
+        peak2 = expand(["macs2_merged_bam/narrowPeak/{group}_peaks.narrowPeak", "macs2_merged_bam/broadPeak/{group}_peaks.broadPeak"], group=GROUPS),
+        merged_peaks = expand("macs2_merged_bam/narrowPeak/{data}.merged_peaks.txt", data=DATA),
+        annotated_peaks = expand("macs2_merged_bam/narrowPeak/{data}.annotated_peaks.txt", data=DATA),
+        featureCount = expand("../results/{data}.featureCount.tsv", data=DATA),
+        diff_peaks_report = expand("diff_peaks/{data}_report.html", data=DATA),
+        motif = expand("footprinting/{group}.bed", group=GROUPS),
+        motif_wig = expand("footprinting/{group}.wig", group=GROUPS),
+        pos = expand("nucleosome_pos/{group}_peaks.gappedPeak", group=GROUPS), 
+        bw_cpm = expand("bw_cpm/{sample}.bw", sample=SAMPLES),
+
+##### setup report #####
+report: "report/workflow.rst"
+
+##### load rules #####
+include: "rules/trim_galore.smk"
+include: "rules/star_map.smk"
+include: "rules/post_stat.smk"
+include: "rules/filter_reads.smk"
+include: "rules/merge_bams.smk"
+include: "rules/ATACseqQC.smk"
+include: "rules/peak_calling.smk"
+include: "rules/peak_calling2.smk"
+include: "rules/merge_peaks.smk"
+include: "rules/annotate_peaks.smk"
+include: "rules/featureCount.smk"
+include: "rules/diff_peaks.smk"
+include: "rules/get_bw.smk"
+include: "rules/footprinting.smk"
+include: "rules/nucleosome_pos.smk"

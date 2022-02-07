@@ -1,0 +1,30 @@
+samples: sample_table.tsv
+tools: 
+    fastq-dump: /home/dic/public/tools/sratoolkit.2.10.8-centos_linux64/bin/fastq-dump
+    trim_galore: /home/dic/public/miniconda3/bin/trim_galore
+    STAR: /home/dic/public/miniconda3/envs/snakemake/bin/STAR
+    samtools: /home/dic/public/miniconda3/bin/samtools
+genome:
+    annotation: /home/dic/public/genomes/UCSC/mm10/mm10.refGene.gtf
+    sequence: /home/dic/public/genomes/UCSC/mm10/mm10.fa 
+blacklist:  /home/dic/public/genomes/UCSC/mm10/mm10-blacklist.v2.bed
+data_dir:
+    trimmed_fq: ../results/trimmed_fq
+    multiqc: ../results/multiqc
+    STAR_align: ../results/STAR_align
+    STAR_align_filter: ../results/STAR_align_filter
+    bw_rpm: ../results/bw_rpm
+    bw_cpm: ../results/bw_cpm
+    macs2: ../results/macs2
+    macs2_merged_bam: ../results/macs2_merged_bam
+    merged_bams: ../results/merged_bams
+    ATACseqQC: ../results/ATACseqQC
+    diff_peaks: ../results/diff_peaks
+    footprinting: ../results/footprinting
+    nucleosome_pos: ../results/nucleosome_pos
+index:
+    STAR_index: /home/dic/public/genomes/UCSC/mm10/STAR_mm10_index
+diffexp:
+    contrasts:
+        - CD4Tn_Post_vs_Pre
+        - CD4Tnn_Post_vs_Pre

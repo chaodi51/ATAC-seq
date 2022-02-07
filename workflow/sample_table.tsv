@@ -1,0 +1,9 @@
+sample	fq1	fq2	group	data	strand
+no_DSB_1	no_DSB_1_1.fastq.gz	no_DSB_1_2.fastq.gz	no_DSB	DSB_data	no
+no_DSB_3	no_DSB_3_1.fastq.gz	no_DSB_3_2.fastq.gz	no_DSB	DSB_data	no
+with_DSB_2	with_DSB_2_1.fastq.gz	with_DSB_2_2.fastq.gz	with_DSB	DSB_data	no
+with_DSB_4	with_DSB_4_1.fastq.gz	with_DSB_4_2.fastq.gz	with_DSB	DSB_data	no
+ctrlA	ctrlA_1.fastq.gz	ctrlA_2.fastq.gz	ctrl	dsbAB_data	no
+ctrlB	ctrlB_1.fastq.gz	ctrlB_2.fastq.gz	ctrl	dsbAB_data	no
+dsbA	dsbA_1.fastq.gz	dsbA_2.fastq.gz	dsb	dsbAB_data	no
+dsbB	dsbB_1.fastq.gz	dsbB_2.fastq.gz	dsb	dsbAB_data	no

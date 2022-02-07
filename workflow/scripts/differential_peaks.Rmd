@@ -1,0 +1,99 @@
+---
+title: "Differential peaks by DESeq2 and ROTS"
+author: "Chao Di, dic@email.chop.edu"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc_depth: 3
+    number_sections: yes
+  pdf_document:
+    toc_depth: '3'
+---
+
+## Abstract {-}
+This is to call differential peaks (merged peaks from MACS2) using DESeq2 and ROTS
+
+```{r setup, include=FALSE, echo = FALSE, cache = FALSE, warning=FALSE}
+# replace with path where you want the results be
+knitr::opts_knit$set(root.dir="/home/dic/bassing_lab/users/dic/ATAC-seq/workflow")
+```
+
+```{r include=FALSE,echo=FALSE,message = FALSE}
+# set home dir when test in console 
+library(DESeq2)
+library(ROTS)
+library(ggplot2)
+library(dplyr)
+```
+
+
+### Overview of the data {-}
+* Load read counts and do data transformation
+Supply with raw read counts table "*featureCount.tsv" calculated by `featureCount`, and sample info "sample_contrast.tsv", do value transformation and normalization (variance stabilizing transformations (VST)) in DESeq2.
+
+```{r message=FALSE, warning=FALSE}
+cts <- read.table(snakemake@input[["featureCount"]], header=TRUE, row.names=1, check.names=FALSE)
+colnames(cts) <- sub(".rmBList.bam","",colnames(cts))
+coldata <- read.table(snakemake@input[["sample_table"]], header=TRUE, row.names="sample",sep="\t", check.names=FALSE)
+coldata <- coldata[,c(3:4)]
+head(coldata)
+
+# load the counts with no design
+dds <- DESeqDataSetFromMatrix(countData=cts, colData=coldata, design=~group)
+
+# genes have at least 10 reads in at least 2 samples
+dds <- dds[rowSums(counts(dds) >= 10) >= 2,]
+
+# normalization and pre-processing
+dds <- DESeq(dds)
+
+# raw count normalization
+norm_counts <- counts(dds, normalized=TRUE) 
+# count transformation, log2 scale, either rlog or vst
+vsd <- vst(dds, blind=FALSE)
+vsd_data <- as.data.frame(assay(vsd))
+cat("The data values after transformation:\n")
+head(vsd_data)
+
+```
+
+* PCA plot
+The PCA plot shows the samples in the 2D plane spanned by their first two principal components. This type of plot is useful for visualizing the overall effect of experimental covariates and batch effects.
+```{r message = FALSE, warning=FALSE}
+pcaData <- plotPCA(vsd, intgroup=c("group"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=group)) +
+  geom_point(size =3)+ 
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed()
+```
+
+### Differential expression analysis by `DESeq2` {-}
+Calculation of expression values (log2 scale), transformed by variance stabilizing transformations (VST).
+Setup contrast as disease vs HC in different age groups: Young, Adults, Older, Oldest etc (grouping variate for different diseases). Export tables with the standard DESeq2 result format including "baseMean log2FoldChange lfcSE stat pvalue padj" plus the "Log fold change shrinked" normalized readcounts )
+
+```{r message=FALSE, warning = FALSE}
+
+resultsNames(dds)
+res <- results (dds)
+table(res$padj<0.1)
+res[!is.na(res$padj) & res$padj<0.1,]
+
+```
+
+### Differential expression analysis by `ROTS` {-}
+New application of reproducibility optimized test statistic (ROTS) to ATAC-seq differential peak calling, outperforms previous methods such as DiffBind, MAnorm2, diffReps, PePr, and THOR. [The paper](
+https://academic.oup.com/nargab/article/3/3/lqab059/6313252)
+
+```{r message=FALSE, warning = FALSE}
+
+groups = c(rep(0,2), rep(1,2))
+rots.out = ROTS(data = vsd_data, groups = groups, B = 1000, seed = 1234)
+summary(rots.out, fdr = 0.05)
+cat("Number of differential peaks with FDR<0.1:")
+length(rots.out$FDR[rots.out$FDR<0.1])
+plot(rots.out, fdr = 0.1, type = "volcano")
+cat("Reproducibility Z-scores below 2 indicate that the data or the statistics are not sufficient for reliable detection!!!")
+rots.out$Z
+```

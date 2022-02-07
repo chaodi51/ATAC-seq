@@ -1,0 +1,196 @@
+---
+title: "ATCA-seq QC using R pacakge ATACseqQC"
+author: "Chao Di, dic@email.chop.edu"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc_depth: 3
+    number_sections: yes
+---
+
+## Abstract {-}
+ATCA-seq QC using R pacakge ATACseqQC, modified from the tutorial
+
+```{r setup, include=FALSE, echo = FALSE, cache = FALSE, warning=FALSE}
+# replace with path where you want the results be
+knitr::opts_knit$set(root.dir="/home/dic/bassing_lab/users/dic/ATAC-seq/workflow/")
+```
+
+```{r include=FALSE,echo=FALSE,message = FALSE}
+# log <- file(snakemake@log[[1]], open="wt")
+# sink(log)
+# sink(log, type="message")
+setwd("/home/dic/bassing_lab/users/dic/ATAC-seq/workflow/")
+library(ATACseqQC)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+# library(phstCons60way.UCSC.mm10)
+# library(BSgenome.Hsapiens.UCSC.hg19)
+# library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+# library(phastCons100way.UCSC.hg19)
+library(Rsamtools)
+library(ChIPpeakAnno)
+library(MotifDb)
+```
+
+## data input {-}
+```{r }
+# bamfile <- system.file("extdata", "GL1.bam", package="ATACseqQC", mustWork=TRUE)
+# bamfile.labels <- gsub(".bam", "", basename(bamfile))
+
+bamfile <- snakemake@input[["rmBList"]]
+bamfile.labels <- sub(".rmBList.bam", "", basename(bamfile))
+```
+
+## Estimate the library complexity {-}
+```{r message=FALSE, warning=FALSE}
+estimateLibComplexity(readsDupFreq(bamfile))
+```
+
+## Fragment size distribution {-}
+First, there should be a large proportion of reads with less than 100 bp, which represents the nucleosome-free region. Second, the fragment size distribution should have a clear periodicity, which is evident in the inset figure, indicative of nucleosome occupacy (present in integer multiples).
+```{r message=FALSE, warning=FALSE}
+fragSizeDist(bamfile, bamfile.labels)
+```
+
+## Nucleosome positioning {-}
+* Adjust the read start sites
+Tn5 transposase has been shown to bind as a dimer and inserts two adaptors into accessible DNA locations separated by 9 bp2.
+
+Therefore, for downstream analysis, such as peak-calling and footprinting, all reads in input bamfile need to be shifted. The function shiftGAlignmentsList can be used to shift the reads. By default, all reads aligning to the positive strand are offset by +4bp, and all reads aligning to the negative strand are offset by -5bp1.
+
+The adjusted reads will be written into a new bamfile for peak calling or footprinting.
+```{r message=FALSE, warning=FALSE}
+## bamfile tags to be read in
+possibleTag <- list("integer"=c("AM", "AS", "CM", "CP", "FI", "H0", "H1", "H2", 
+                                "HI", "IH", "MQ", "NH", "NM", "OP", "PQ", "SM",
+                                "TC", "UQ"), 
+                 "character"=c("BC", "BQ", "BZ", "CB", "CC", "CO", "CQ", "CR",
+                               "CS", "CT", "CY", "E2", "FS", "LB", "MC", "MD",
+                               "MI", "OA", "OC", "OQ", "OX", "PG", "PT", "PU",
+                               "Q2", "QT", "QX", "R2", "RG", "RX", "SA", "TS",
+                               "U2"))
+
+bamTop100 <- scanBam(BamFile(bamfile, yieldSize = 100),
+                     param = ScanBamParam(tag=unlist(possibleTag)))[[1]]$tag
+tags <- names(bamTop100)[lengths(bamTop100)>0]
+tags
+
+## files will be output into outPath
+outPath <- paste0("STAR_align_filter/splited/", bamfile.labels)
+dir.create(outPath)
+
+## shift the coordinates of 5'ends of alignments in the bam file
+seqlev <- "chr1" ## subsample data for quick run
+seqinformation <- seqinfo(TxDb.Mmusculus.UCSC.mm10.knownGene)
+which <- as(seqinformation[seqlev], "GRanges")
+gal <- readBamFile(bamfile, tag=tags, which=which, asMates=TRUE)
+shiftedBamfile <- file.path(outPath, "shifted.bam")
+gal1 <- shiftGAlignmentsList(gal, outbam=shiftedBamfile)
+```
+     
+* Transcription Start Site (TSS) Enrichment Score {-}
+TSS enrichment score is a raio between aggregate distribution of reads centered on TSSs and that flanking the corresponding TSSs. TSS score = the depth of TSS (each 100bp window within 1000 bp each side) / the depth of end flanks (100bp each end). TSSE score = max(mean(TSS score in each window)). TSS enrichment score is calculated according to the definition at https://www.encodeproject.org/data-standards/terms/#enrichment. Transcription start site (TSS) enrichment values are dependent on the reference files used; cutoff values for high quality data are listed in the following table from https://www.encodeproject.org/atac-seq/.
+
+```{r message=FALSE, warning=FALSE}
+txs <- transcripts(TxDb.Mmusculus.UCSC.mm10.knownGene)
+tsse <- TSSEscore(gal1, txs)
+tsse$TSSEscore
+plot(100*(-9:10-.5), tsse$values, type="b", 
+     xlab="distance to TSS",
+     ylab="aggregate TSS score")
+```
+
+* Split reads
+The shifted reads will be split into different bins, namely nucleosome free, mononucleosome, dinucleosome, and trinucleosome. Shifted reads that do not fit into any of the above bins will be discarded. Splitting reads is a time-consuming step because we are using random forest to classify the fragments based on fragment length, GC content and conservation scores3.
+
+By default, we assign the top 10% of short reads (reads below 100_bp) as nucleosome-free regions and the top 10% of intermediate length reads as (reads between 180 and 247 bp) mononucleosome. This serves as the training set to classify the rest of the fragments using random forest. The number of the tree will be set to 2 times of square root of the length of the training set.
+```{r message=FALSE, warning=FALSE}
+## run program for chromosome 1 only
+txs <- txs[seqnames(txs) %in% "chr1"]
+genome <- Mmusculus
+## split the reads into NucleosomeFree, mononucleosome, 
+## dinucleosome and trinucleosome.
+## and save the binned alignments into bam files.
+objs <- splitGAlignmentsByCut(gal1, txs=txs, genome=genome, outPath = outPath)
+## list the files generated by splitGAlignmentsByCut.
+dir(outPath)
+
+```
+
+* Heatmap and coverage curve for nucleosome positions
+By averaging the signal across all active TSSs, we should observe that nucleosome-free fragments are enriched at the TSSs, whereas the nucleosome-bound fragments should be enriched both upstream and downstream of the active TSSs and display characteristic phasing of upstream and downstream nucleosomes. Because ATAC-seq reads are concentrated at regions of open chromatin, users should see a strong nucleosome signal at the +1 nucleosome, but the signal decreases at the +2, +3 and +4 nucleosomes.
+```{r message=FALSE, warning=FALSE}
+
+bamfiles <- file.path(outPath,
+                     c("NucleosomeFree.bam",
+                     "mononucleosome.bam",
+                     "dinucleosome.bam",
+                     "trinucleosome.bam"))
+## Plot the cumulative percentage of tag allocation in nucleosome-free 
+## and mononucleosome bam files.
+cumulativePercentage(bamfiles[1:2], as(seqinformation["chr1"], "GRanges"))
+
+TSS <- promoters(txs, upstream=0, downstream=1)
+TSS <- unique(TSS)
+## estimate the library size for normalization
+(librarySize <- estLibSize(bamfiles))
+
+## calculate the signals around TSSs.
+NTILE <- 101
+dws <- ups <- 1010
+sigs <- enrichedFragments(gal=objs[c("NucleosomeFree", 
+                                     "mononucleosome",
+                                     "dinucleosome",
+                                     "trinucleosome")], 
+                          TSS=TSS,
+                          librarySize=librarySize,
+                          seqlev=seqlev,
+                          TSS.filter=0.5,
+                          n.tile = NTILE,
+                          upstream = ups,
+                          downstream = dws)
+## log2 transformed signals
+sigs.log2 <- lapply(sigs, function(.ele) log2(.ele+1))
+#plot heatmap
+featureAlignedHeatmap(sigs.log2, reCenterPeaks(TSS, width=ups+dws),
+                      zeroAt=.5, n.tile=NTILE)
+
+## get signals normalized for nucleosome-free and nucleosome-bound regions.
+out <- featureAlignedDistribution(sigs, 
+                                  reCenterPeaks(TSS, width=ups+dws),
+                                  zeroAt=.5, n.tile=NTILE, type="l", 
+                                  ylab="Averaged coverage")
+## rescale the nucleosome-free and nucleosome signals to 0~1
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+out <- apply(out, 2, range01)
+matplot(out, type="l", xaxt="n", 
+        xlab="Position (bp)", 
+        ylab="Fraction of signal")
+axis(1, at=seq(0, 100, by=10)+1, 
+     labels=c("-1K", seq(-800, 800, by=200), "1K"), las=2)
+abline(v=seq(0, 100, by=10)+1, lty=2, col="gray")
+```
+
+## Plot Footprints {-}
+ATAC-seq footprints infer factor occupancy genome-wide. The factorFootprints function uses matchPWM to predict the binding sites using the input position weight matrix (PWM). Then it calculates and plots the accumulated coverage for those binding sites to show the status of the occupancy genome-wide. Unlike CENTIPEDE4, the footprints generated here do not take the conservation (PhyloP) into consideration. factorFootprints function could also accept the binding sites as a GRanges object.
+
+
+```{r message=FALSE, warning=FALSE}
+## foot prints
+
+CTCF <- query(MotifDb, c("CTCF"))
+CTCF <- as.list(CTCF)
+print(CTCF[[1]], digits=2)
+sigs <- factorFootprints(shiftedBamfile, pfm=CTCF[[1]], 
+                         genome=genome, ## Don't have a genome? ask ?factorFootprints for help
+                         min.score="90%", seqlev=seqlev,
+                         upstream=100, downstream=100)
+
+featureAlignedHeatmap(sigs$signal, 
+                      feature.gr=reCenterPeaks(sigs$bindingSites,
+                                               width=200+width(sigs$bindingSites[1])), 
+                      annoMcols="score",
+                      sortBy="score",
+                      n.tile=ncol(sigs$signal[[1]]))
+```

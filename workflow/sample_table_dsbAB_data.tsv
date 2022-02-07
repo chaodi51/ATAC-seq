@@ -1,0 +1,5 @@
+sample	fq1	fq2	group	data	strand
+ctrlA	ctrlA_1.fastq.gz	ctrlA_2.fastq.gz	ctrl	dsbAB_data	no
+ctrlB	ctrlB_1.fastq.gz	ctrlB_2.fastq.gz	ctrl	dsbAB_data	no
+dsbA	dsbA_1.fastq.gz	dsbA_2.fastq.gz	dsb	dsbAB_data	no
+dsbB	dsbB_1.fastq.gz	dsbB_2.fastq.gz	dsb	dsbAB_data	no

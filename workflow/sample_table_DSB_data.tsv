@@ -1,0 +1,5 @@
+sample	fq1	fq2	group	data	strand
+no_DSB_1	no_DSB_1_1.fastq.gz	no_DSB_1_2.fastq.gz	no_DSB	DSB_data	no
+no_DSB_3	no_DSB_3_1.fastq.gz	no_DSB_3_2.fastq.gz	no_DSB	DSB_data	no
+with_DSB_2	with_DSB_2_1.fastq.gz	with_DSB_2_2.fastq.gz	with_DSB	DSB_data	no
+with_DSB_4	with_DSB_4_1.fastq.gz	with_DSB_4_2.fastq.gz	with_DSB	DSB_data	no
