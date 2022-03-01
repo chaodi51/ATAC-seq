@@ -9,11 +9,11 @@ Insert your code into the respective folders, i.e. `scripts`, `rules`, and `envs
 This is the first version of ATAC-seq, using Bassing lab datasets dsb vs ctrl and no_DSB vs with_DSB
 ## Authors
 
-* chaodi (@dic)
+* chaodi (dic@chop.edu)
 
 ## Usage
 Running on new respublica by:
 snakemake --latency-wait 10 -j 10 -p -c "sbatch --job-name={params.jobName} --mem={params.mem} -c {threads} --time=360 -e sbatch/{params.jobName}.e -o sbatch/{params.jobName}.o"
 
 ## Workflow
-![alt text](https://github.research.chop.edu/dic/ATAC-seq/blob/master/workflow/DAG.png?raw=true)
+![alt text](https://github.com/chaodi51/ATAC-seq/blob/master/workflow/DAG.png?raw=true)
