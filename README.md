@@ -9,7 +9,7 @@ Insert your code into the respective folders, i.e. `scripts`, `rules`, and `envs
 This is the first version of ATAC-seq, using Bassing lab datasets dsb vs ctrl and no_DSB vs with_DSB
 ## Authors
 
-* chaodi (dic@chop.edu)
+* chaodi(dic@chop.edu)
 
 ## Usage
 Running on new respublica by:
